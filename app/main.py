@@ -8,6 +8,7 @@ from sqlmodel import SQLModel
 from app.database import engine
 from app.database.session import SessionLocal
 from app.repositories.business_repository import seed_fictional_business_data
+from app.routers.assistant_router import router as assistant_router
 from app.routers.business_router import router as business_router
 
 
@@ -26,6 +27,7 @@ app = FastAPI(title="Business Pulse API", lifespan=lifespan)
 
 # Register our business endpoint definitions
 app.include_router(business_router)
+app.include_router(assistant_router)
 
 
 @app.get("/")
