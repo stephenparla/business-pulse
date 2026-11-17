@@ -1,0 +1,1 @@
+"""Business Pulse application package."""
