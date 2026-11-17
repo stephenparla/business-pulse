@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -7,12 +8,19 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.session import SessionLocal
 from app.models.customer import Customer
 from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.models.payment_allocation import PaymentAllocation
+from app.services.business_intelligence_service import (
+    get_order_summary as get_order_summary_service,
+    get_outstanding_receivables as get_outstanding_receivables_service,
+    get_revenue_summary as get_revenue_summary_service,
+    get_top_customers as get_top_customers_service,
+)
 
 
 def _money(value: str | Decimal) -> Decimal:
@@ -223,3 +231,74 @@ async def seed_fictional_business_data(db: AsyncSession) -> Organization:
     await db.commit()
     await db.refresh(organization)
     return organization
+
+
+def _serialize_model(model: object) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    if hasattr(model, "dict"):
+        return model.dict()
+    return model
+
+
+async def _get_default_organization_id(db: AsyncSession) -> uuid.UUID:
+    organization = await db.scalar(select(Organization).order_by(Organization.created_at.asc()))
+    if organization is None:
+        raise ValueError("No organization found for business summary queries.")
+    return organization.id
+
+
+async def _get_revenue_summary_async(period_start: str, period_end: str) -> dict:
+    del period_start, period_end
+    async with SessionLocal() as db:
+        organization_id = await _get_default_organization_id(db)
+        result = await get_revenue_summary_service(db, organization_id)
+        return _serialize_model(result)
+
+
+async def _get_order_summary_async(period_start: str, period_end: str) -> dict:
+    del period_start, period_end
+    async with SessionLocal() as db:
+        organization_id = await _get_default_organization_id(db)
+        result = await get_order_summary_service(db, organization_id)
+        return _serialize_model(result)
+
+
+async def _get_top_customers_async(period_start: str, period_end: str, limit: int = 5) -> dict:
+    del period_start, period_end
+    async with SessionLocal() as db:
+        organization_id = await _get_default_organization_id(db)
+        result = await get_top_customers_service(db, organization_id)
+        serialized = [
+            _serialize_model(item)
+            for item in result[:limit]
+        ]
+        return {"items": serialized, "count": len(serialized)}
+
+
+async def _get_receivables_async() -> dict:
+    async with SessionLocal() as db:
+        organization_id = await _get_default_organization_id(db)
+        result = await get_outstanding_receivables_service(db, organization_id)
+        serialized = [_serialize_model(item) for item in result]
+        return {"items": serialized, "count": len(serialized)}
+
+
+def get_revenue_summary(period_start: str, period_end: str) -> dict:
+    """Retrieve actual revenue metrics."""
+    return asyncio.run(_get_revenue_summary_async(period_start, period_end))
+
+
+def get_order_summary(period_start: str, period_end: str) -> dict:
+    """Retrieve order counts and status breakdown."""
+    return asyncio.run(_get_order_summary_async(period_start, period_end))
+
+
+def get_top_customers(period_start: str, period_end: str, limit: int = 5) -> dict:
+    """Retrieve customers ranked by invoiced sales."""
+    return asyncio.run(_get_top_customers_async(period_start, period_end, limit=limit))
+
+
+def get_receivables() -> dict:
+    """Retrieve outstanding and overdue receivables."""
+    return asyncio.run(_get_receivables_async())
